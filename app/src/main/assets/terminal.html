@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>USB Serial Terminal</title>
+    <style>
+        :root { color-scheme: dark; --ink: #e6edf7; --muted: #a5b4c9; --line: #29364a; --accent: #7de2c3; --surface: #172131; }
+        * { box-sizing: border-box; }
+        body { margin: 0; padding: 24px; color: var(--ink); background: #0c111b; font-family: system-ui, -apple-system, sans-serif; font-size: 14px; line-height: 1.5; }
+        main { max-width: 1000px; margin: auto; }
+        header { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
+        .eyebrow { color: var(--accent); font-size: 10px; font-weight: 700; letter-spacing: .16em; margin: 0 0 6px; }
+        h1 { font-size: clamp(24px, 5vw, 32px); line-height: 1.2; letter-spacing: -.04em; font-weight: 650; margin: 0; }
+        .subtitle { margin: 8px 0 0; color: var(--muted); font-size: 13px; }
+        #status { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); padding: 8px 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); font-size: 12px; overflow-wrap: anywhere; }
+        #status::before { content: ""; flex: 0 0 6px; height: 6px; border-radius: 50%; background: currentColor; }
+        #status[data-state="connected"] { color: var(--accent); border-color: #31574f; background: #142c29; }
+        #status[data-state="connecting"] { color: #f3cf86; }
+        .controls { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; padding: 18px; margin-bottom: 20px; background: var(--surface); border: 1px solid var(--line); border-radius: 20px; }
+        label { display: grid; gap: 8px; color: var(--muted); font-size: 12px; font-weight: 500; }
+        button, input, select { min-height: 48px; padding: 10px 16px; border: 1px solid var(--line); border-radius: 12px; color: var(--ink); background: #101927; font: inherit; max-width: 100%; }
+        input, select { font-size: 16px; }
+        button { cursor: pointer; font-weight: 600; transition: background .15s, border-color .15s; }
+        button:not(:disabled):hover { background: #24354b; border-color: #62758d; }
+        button:not(:disabled):active { background: #30455f; }
+        button:disabled { cursor: default; opacity: .45; }
+        button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+        #connect, #send { color: #0c2922; border-color: var(--accent); background: var(--accent); }
+        #connect:not(:disabled):hover, #send:not(:disabled):hover { background: #a6efd8; border-color: #a6efd8; }
+        .console { border: 1px solid var(--line); border-radius: 20px; overflow: hidden; margin-bottom: 20px; background: #090e16; }
+        .console-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 16px; border-bottom: 1px solid var(--line); background: #121b29; }
+        .section-title { margin: 0; font-size: 10px; font-weight: 700; letter-spacing: .14em; color: var(--muted); }
+        .console-actions { display: flex; align-items: center; gap: 12px; }
+        #clear { background: transparent; padding: 8px 12px; border-color: transparent; color: var(--muted); }
+        #output { height: min(42vh, 460px); min-height: 180px; padding: 20px; overflow: auto; color: #d2e8e2; font: 13px/1.75 ui-monospace, "Droid Sans Mono", Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
+        #output:empty::before { content: "Ready when you are.\A Connect a USB device to start receiving data."; white-space: pre-wrap; color: var(--muted); font: 13px/1.9 system-ui, sans-serif; }
+        form { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; padding: 18px; background: var(--surface); border: 1px solid var(--line); border-radius: 20px; }
+        .message { flex: 1 1 240px; min-width: 0; }
+        .message input { width: 100%; }
+        .check { display: flex; align-items: center; gap: 8px; min-height: 48px; cursor: pointer; }
+        .check input { min-height: 20px; width: 20px; height: 20px; margin: 0; accent-color: var(--accent); }
+        #error { color: #ffb3bb; overflow-wrap: anywhere; margin-top: 16px; }
+        #error:empty { display: none; }
+        @media (max-width: 480px) {
+            body { padding: 20px 16px; }
+            header { gap: 12px; margin-bottom: 20px; }
+            .controls { gap: 10px; padding: 14px; }
+            .controls label { flex: 1 1 100%; }
+            .controls input { width: 100%; }
+            .controls button { flex: 1; }
+            form { padding: 14px; }
+            .message { flex-basis: 100%; }
+            form > label:not(.message) { flex: 1; }
+            #send { min-width: 96px; }
+        }
+        @media (prefers-reduced-motion: reduce) { button { transition: none; } }
+    </style>
+</head>
+<body>
+<main>
+    <header>
+        <div><p class="eyebrow">USB WORKSPACE</p><h1>Serial terminal</h1><p class="subtitle">Connect. Inspect. Send.</p></div>
+        <span id="status" role="status" data-state="disconnected">Disconnected</span>
+    </header>
+    <div class="controls">
+        <label>Baud rate<input id="baud" type="number" min="1" max="2147483647" value="115200"></label>
+        <button id="connect" type="button">Connect</button>
+        <button id="disconnect" type="button" disabled>Disconnect</button>
+    </div>
+    <section class="console" aria-labelledby="receive-title">
+        <div class="console-bar">
+            <h2 class="section-title" id="receive-title">RECEIVE</h2>
+            <div class="console-actions">
+                <label class="check"><input id="hex" type="checkbox">Hex</label>
+                <button id="clear" type="button">Clear</button>
+            </div>
+        </div>
+        <pre id="output" role="log" aria-label="Received serial data" tabindex="0"></pre>
+    </section>
+    <form id="transmit">
+        <label class="message">Transmit<input id="message" placeholder="Type a message..." autocomplete="off" disabled></label>
+        <label>Line ending<select id="ending"><option value="lf">LF</option><option value="crlf">CRLF</option><option value="none">None</option></select></label>
+        <button id="send" disabled>Send</button>
+    </form>
+    <div id="error" role="alert"></div>
+</main>
+<script>
+    'use strict';
+    const element = id => document.getElementById(id);
+    let port;
+    let reader;
+    let readTask;
+    let connecting = false;
+    let disconnecting = false;
+    let sending = false;
+    function showError(error) { element('error').textContent = error.message || String(error); }
+    function render() {
+        const connected = !!port;
+        element('connect').disabled = connected || connecting || disconnecting;
+        element('disconnect').disabled = !connected || disconnecting || sending;
+        element('send').disabled = !connected || disconnecting || sending;
+        element('message').disabled = !connected || disconnecting;
+        element('baud').disabled = connected || connecting;
+        element('status').textContent = connected ? 'Connected' : connecting ? 'Connecting...' : 'Disconnected';
+        element('status').dataset.state = connected ? 'connected' : connecting ? 'connecting' : 'disconnected';
+    }
+    function append(text) {
+        const output = element('output');
+        output.textContent = (output.textContent + text).slice(-200000);
+        output.scrollTop = output.scrollHeight;
+    }
+    async function receive() {
+        const decoder = new TextDecoder();
+        const currentReader = reader;
+        try {
+            while (true) {
+                const { value, done } = await currentReader.read();
+                if (done) break;
+                append(element('hex').checked ? Array.from(value, byte => byte.toString(16).padStart(2, '0')).join(' ') + ' ' :
+                    decoder.decode(value, { stream: true }));
+            }
+        } catch (error) { if (!disconnecting) showError(error); }
+        finally { currentReader.releaseLock(); if (reader === currentReader) reader = null; }
+    }
+    element('connect').onclick = async () => {
+        connecting = true;
+        element('error').textContent = '';
+        render();
+        let selected;
+        try {
+            selected = await navigator.serial.requestPort();
+            await selected.open({ baudRate: Number(element('baud').value) });
+            port = selected;
+            reader = port.readable.getReader();
+            readTask = receive();
+            readTask.then(() => { if (port && !disconnecting) disconnect(); });
+        } catch (error) { showError(error); }
+        finally { connecting = false; render(); }
+    };
+    async function disconnect() {
+        if (!port || disconnecting || sending) return;
+        disconnecting = true;
+        render();
+        try {
+            if (reader) await reader.cancel();
+            if (readTask) await readTask;
+            if (port.connected) await port.close();
+        } catch (error) { showError(error); }
+        finally { port = null; disconnecting = false; render(); }
+    }
+    element('disconnect').onclick = disconnect;
+    element('clear').onclick = () => { element('output').textContent = ''; };
+    element('transmit').onsubmit = async event => {
+        event.preventDefault();
+        if (!port?.writable || sending || disconnecting) return;
+        sending = true;
+        render();
+        const writer = port.writable.getWriter();
+        try {
+            const ending = element('ending').value;
+            await writer.write(new TextEncoder().encode(element('message').value + (ending === 'lf' ? '\n' : ending === 'crlf' ? '\r\n' : '')));
+            element('message').value = '';
+        } catch (error) { showError(error); }
+        finally { writer.releaseLock(); sending = false; render(); }
+    };
+    if (!navigator.serial) {
+        showError(new Error('Web Serial is unavailable in this browser.'));
+        element('connect').disabled = true;
+    } else {
+        navigator.serial.addEventListener('disconnect', event => {
+            if (event.port === port) { showError(new Error('USB device disconnected.')); disconnect(); }
+        });
+    }
+</script>
+</body>
+</html>
